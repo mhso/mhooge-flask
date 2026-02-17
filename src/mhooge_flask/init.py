@@ -215,7 +215,7 @@ def run_app(app: Flask, app_name: str, port: int, host: str = ""):
     server_cls = app.config["_SERVER_CLS"]
 
     # Run the server using the given server wrapper class.
-    server = server_cls(host, str(port), app)
+    server = server_cls(host, port, app)
 
     del app.config["_SERVER_CLS"]
 
