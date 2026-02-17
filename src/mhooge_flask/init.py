@@ -208,12 +208,7 @@ def create_app(
 
     return web_app
 
-def run_app(app: Flask, app_name: str, ports_file: str, host: str = ""):
-    # Load data for which port the app should run on.
-    with open(ports_file, "r", encoding="utf-8") as fp:
-        port_map = json.load(fp)
-        port = port_map[app_name]
-
+def run_app(app: Flask, app_name: str, port: int, host: str = ""):
     host_ip = "127.0.0.1" if host == "" else host
     logger.info(f"Starting Flask app on {host_ip}:{port}/{app_name}")
 
