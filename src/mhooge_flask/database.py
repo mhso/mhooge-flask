@@ -562,8 +562,10 @@ class SQLiteDatabase(Database):
 
             if result is None:
                 return None
+            
+            expires = result[2]
 
-            if result[2] < time():
+            if expires is None or expires < time():
                 # Token is expired
                 query_delete = "DELETE FROM auth_tokens WHERE token = ?"
                 session.execute_query(query_delete, auth_token)
