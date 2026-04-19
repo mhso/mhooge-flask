@@ -1,4 +1,5 @@
 from enum import Enum
+from abc import abstractmethod
 import importlib
 import os
 import pkgutil
@@ -13,9 +14,10 @@ from typing import Dict, List, Tuple
 from marshmallow.fields import Enum as MarshEnum
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema, SQLAlchemySchema
 from marshmallow_sqlalchemy.fields import Related, RelatedList
-from sqlalchemy import Integer, create_engine, String, ForeignKey, delete, event, select, update
+from sqlalchemy import Integer, create_engine, String, ForeignKey, delete, event, select, text
 from sqlalchemy.orm import Session, Mapped, sessionmaker, DeclarativeBase, mapped_column, Mapper, RelationshipDirection, InstrumentedAttribute
 from sqlalchemy.sql.schema import CallableColumnDefault
+from sqlalchemy.exc import OperationalError as SQLAOperationError
 from pydantic import create_model, Field, BaseModel
 from loguru import logger
 
@@ -173,8 +175,8 @@ class AuthToken(Base):
     expires: Mapped[int] = mapped_column(Integer, nullable=False)
 
 class Database:
-    def __init__(self, db_path: str, add_user_tables: bool) -> None:
-        self.db_path = db_path
+    def __init__(self, conn_str: str, add_user_tables: bool) -> None:
+        self.conn_str = conn_str
         self.add_user_tables = add_user_tables
         self._connections = {}
 
@@ -182,20 +184,18 @@ class Database:
     def connection(self) -> Connection | Session | None:
         return self._connections.get(get_ident())
 
+    @abstractmethod
+    def create_database_if_missing(self):
+        ...
+
+    @abstractmethod
     def get_connection(self) -> Connection | Session | None:
         ...
 
-    def create_backup(self):
-        without_ext = self.db_path.replace(".db", "")
-        backup_name = f"{without_ext}_backup.db"
-        try:
-            # Remove old backup if it exists.
-            if os.path.exists(backup_name):
-                os.remove(backup_name)
-
-            copyfile(self.db_path, backup_name)
-        except (OSError, IOError) as exc:
-            raise DBException(exc.args[0])
+    def close(self, thread_id: int):
+        self._connections[thread_id].close()
+        del self._connections[thread_id]
+        del self._nested_contexts[thread_id]
 
 def setup_pydantic_models():
     for class_ in Base.__subclasses__():
@@ -284,18 +284,18 @@ def model_init(model, args, kwargs):
     model.__pydantic__(**kwargs)
 
 class SQLAlchemyDatabase(Database):
-    def __init__(self, db_path: str, models_folder: str, autogenerate_schemas: bool = False, add_user_tables: bool = False) -> None:
-        super().__init__(db_path, add_user_tables)
+    def __init__(self, conn_str: str, models_folder: str, autogenerate_schemas: bool = False, add_user_tables: bool = False) -> None:
+        super().__init__(conn_str, add_user_tables)
+
+        self.engine = create_engine(conn_str, pool_pre_ping=True)
+
         self.models_folder = models_folder
-        self.engine = create_engine(f"sqlite:///{self.db_path}")
 
         self._sessionmaker = sessionmaker(bind=self.engine)
         self._nested_contexts = {}
         self._connections: Dict[int, Session] = {}
 
-        if not os.path.exists(self.db_path):
-            logger.info("Creating database from schema file.")
-            self.create_database()
+        self.create_database_if_missing()
 
         if autogenerate_schemas:
             event.listen(Mapper, "after_configured", setup_marshmallow_schemas(self._sessionmaker()))
@@ -304,11 +304,29 @@ class SQLAlchemyDatabase(Database):
                 if hasattr(class_, "__tablename__"):
                     event.listen(class_, "init", model_init)
 
-    def get_connection(self):
-        session = self._sessionmaker()
-        return session
+    def create_database_if_missing(self):
+        try:
+            with self.engine.connect():
+                pass
 
-    def create_database(self):
+        except SQLAOperationError as exc:
+            if f'database "{self.engine.url.database}" does not exist' in exc.args[0]:
+                url = self.engine.url.set(database="postgres")
+                engine = create_engine(url)
+
+                with engine.connect() as conn:
+                    conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(text(f"CREATE DATABASE {self.engine.url.database}"))
+                    conn.commit()
+
+                engine.dispose()
+
+        self._create_tables()
+
+    def get_connection(self):
+        return self._sessionmaker()
+
+    def _create_tables(self):
         if len(Base.metadata.tables) == 0:
             self._import_models()
 
@@ -343,9 +361,7 @@ class SQLAlchemyDatabase(Database):
         self._nested_contexts[thread_id] = nested_contexts
 
         if nested_contexts == 0:
-            self._connections[thread_id].close()
-            del self._connections[thread_id]
-            del self._nested_contexts[thread_id]
+            self.close(thread_id)
 
     def create_user(self, user_id: str, username: str , hashed_pass: str):
         try:
@@ -405,22 +421,25 @@ class SQLAlchemyDatabase(Database):
             session.commit()
 
 class SQLiteDatabase(Database):
-    def __init__(self, db_path: str, schema_file: str | None = None, add_user_tables: bool = False, row_factory=None):
-        super().__init__(db_path, add_user_tables)
+    def __init__(self, conn_str: str, schema_file: str | None = None, add_user_tables: bool = False, row_factory=None):
+        super().__init__(conn_str, add_user_tables)
         self.schema_file = schema_file
         self.add_user_tables = add_user_tables
         self._nested_contexts = {}
         self._connections = {}
         self._row_factory = row_factory
 
-        if not os.path.exists(self.db_path):
-            logger.info("Creating database from schema file.")
-            self.create_database()
+        self.create_database_if_missing()
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.conn_str)
         conn.row_factory = self._row_factory
         return conn
+
+    def create_database_if_missing(self):
+        if not os.path.exists(self.conn_str):
+            logger.info("Creating database from schema file.")
+            self._create_database()
 
     def create_user_tables(self, conn):
         conn.cursor().execute(
@@ -445,7 +464,7 @@ class SQLiteDatabase(Database):
         )
         conn.commit()
 
-    def create_database(self):
+    def _create_database(self):
         with self as session:
             if self.schema_file is not None:
                 # Initialize database with provided schema, if it exists.
@@ -455,6 +474,18 @@ class SQLiteDatabase(Database):
 
             if self.add_user_tables:
                 self.create_user_tables(session.connection)
+
+    def create_backup(self):
+        without_ext = self.conn_str.split(".")[0]
+        backup_name = f"{without_ext}_backup.db"
+        try:
+            # Remove old backup if it exists.
+            if os.path.exists(backup_name):
+                os.remove(backup_name)
+
+            copyfile(self.conn_str, backup_name)
+        except (OSError, IOError) as exc:
+            raise DBException(exc.args[0])
 
     def query(self, query: str, *params, format_func=None, default=None):
         return Query(query, *params, format_func=format_func, default=default, context=self)
@@ -518,9 +549,7 @@ class SQLiteDatabase(Database):
         self._nested_contexts[thread_id] = nested_contexts
 
         if nested_contexts == 0:
-            self._connections[thread_id].close()
-            del self._connections[thread_id]
-            del self._nested_contexts[thread_id]
+            self.close(thread_id)
 
     def create_user(self, user_id, username, hashed_pass):
         try:
