@@ -328,7 +328,7 @@ class SQLAlchemyDatabase(Database):
     def create_backup(self):
         args = ["pg_dump", self.engine.url.database]
         with open(f"{self.backup_path}/pg_backup", "w") as fp:
-            Popen(args, stdout=fp).wait()
+            Popen(args, stdout=fp, shell=True).wait()
 
     def get_connection(self):
         return self._sessionmaker()
