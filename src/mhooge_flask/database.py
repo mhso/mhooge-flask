@@ -7,6 +7,7 @@ import re
 import sqlite3
 from shutil import copyfile
 from sqlite3 import ProgrammingError, OperationalError, DatabaseError, Connection, Cursor
+from subprocess import Popen
 from threading import get_ident
 from time import time
 from typing import Dict, List, Tuple
@@ -284,12 +285,13 @@ def model_init(model, args, kwargs):
     model.__pydantic__(**kwargs)
 
 class SQLAlchemyDatabase(Database):
-    def __init__(self, conn_str: str, models_folder: str, autogenerate_schemas: bool = False, add_user_tables: bool = False) -> None:
+    def __init__(self, conn_str: str, models_folder: str, backup_path: str, autogenerate_schemas: bool = False, add_user_tables: bool = False) -> None:
         super().__init__(conn_str, add_user_tables)
 
         self.engine = create_engine(conn_str, pool_pre_ping=True)
 
         self.models_folder = models_folder
+        self.backup_path = backup_path
 
         self._sessionmaker = sessionmaker(bind=self.engine)
         self._nested_contexts = {}
@@ -322,6 +324,11 @@ class SQLAlchemyDatabase(Database):
                 engine.dispose()
 
         self._create_tables()
+
+    def create_backup(self):
+        args = ["pg_dump", self.engine.url.database]
+        with open(f"{self.backup_path}/pg_backup") as fp:
+            Popen(args, stdout=fp).wait()
 
     def get_connection(self):
         return self._sessionmaker()
@@ -439,7 +446,16 @@ class SQLiteDatabase(Database):
     def create_database_if_missing(self):
         if not os.path.exists(self.conn_str):
             logger.info("Creating database from schema file.")
-            self._create_database()
+            with self as session:
+                if self.schema_file is not None:
+                    # Initialize database with provided schema, if it exists.
+                    with open(self.schema_file, "r") as f:
+                        session.connection.cursor().executescript(f.read())
+
+                    session.connection.commit()
+
+                if self.add_user_tables:
+                    self.create_user_tables(session.connection)
 
     def create_user_tables(self, conn):
         conn.cursor().execute(
@@ -463,17 +479,6 @@ class SQLiteDatabase(Database):
             """
         )
         conn.commit()
-
-    def _create_database(self):
-        with self as session:
-            if self.schema_file is not None:
-                # Initialize database with provided schema, if it exists.
-                with open(self.schema_file, "r") as f:
-                    session.connection.cursor().executescript(f.read())
-                session.connection.commit()
-
-            if self.add_user_tables:
-                self.create_user_tables(session.connection)
 
     def create_backup(self):
         without_ext = self.conn_str.split(".")[0]
