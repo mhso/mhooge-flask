@@ -144,20 +144,20 @@ def create_app(
     for route in routes:
         name = route.route
         path = route.folder
-        route_modules[route.blueprint] = importlib.import_module(f"{root_module}.{path}.{name}")
+        route_modules[f"{path}/{name}"] = importlib.import_module(f"{root_module}.{path}.{name}")
 
         if route.parent_route is not None:
             name = route.parent_route.route
             path = route.parent_route.folder
 
             if route.parent_route.blueprint not in route_modules:
-                route_modules[route.parent_route.blueprint] = importlib.import_module(f"{root_module}.{path}.{name}")
+                route_modules[f"{path}/{name}"] = importlib.import_module(f"{root_module}.{path}.{name}")
 
     parent_blueprints = set()
 
     # Register blueprints for all the pages/routes.
     for route in routes:
-        module = route_modules[route.blueprint]
+        module = route_modules[f"{route.folder}/{route.route}"]
         if route.parent_route is None:
             prefix = root if route.prefix == "root" else f"{root}{route.prefix}"
         else:
@@ -165,7 +165,7 @@ def create_app(
 
         if route.parent_route is not None:
             parent_route = route.parent_route
-            parent_module = route_modules[parent_route.blueprint]
+            parent_module = route_modules[f"{parent_route.folder}/{parent_route.route}"]
             parent_prefix = root if parent_route.prefix == "root" else f"{root}{parent_route.prefix}"
             parent = getattr(parent_module, parent_route.blueprint)
             parent_blueprints.add((parent, parent_prefix))
