@@ -75,6 +75,28 @@ def login(data, user_key, pass_key, url_success, template_error, auth_max_age=60
 
     return save_auth_token(user_id, resp, secret_file, auth_max_age)
 
+def login_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
+    database = flask.current_app.config["DATABASE"]
+    secret_file = flask.current_app.config["SECRET_FILE"]
+
+    if not user_key in data or not pass_key in data:
+        error_msg = "Could not login: Username or Password was not given."
+        return routing.make_json_response(error_msg, 400)
+
+    hashed_password = get_hashed_password(data[pass_key], secret_file)
+
+    if not database.password_matches(data[user_key], hashed_password):
+        # Password or user doesn't exist/match.
+        error_msg = "Could not login: Username or Password does not match."
+        return routing.make_json_response(error_msg, 401)
+
+    user_name = data[user_key]
+    user_id = database.get_user_id(user_name)
+
+    resp = routing.make_json_response({"user_id": user_id, "user_name": user_name}, 200)
+
+    return save_auth_token(user_id, resp, secret_file, auth_max_age)
+
 def signup(data, user_key, pass_key, url_success, template_error, auth_max_age=60*60*24*60):
     database = flask.current_app.config["DATABASE"]
     secret_file = flask.current_app.config["SECRET_FILE"]
@@ -97,6 +119,30 @@ def signup(data, user_key, pass_key, url_success, template_error, auth_max_age=6
 
     # Username not unique.
     return routing.make_template_context(template_error, 400, error="Username is already taken.")
+
+def signup_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
+    database = flask.current_app.config["DATABASE"]
+    secret_file = flask.current_app.config["SECRET_FILE"]
+
+    input_verified, error = verify_input(
+        data, ["Username", "Password"], [user_key, pass_key], [32, 64]
+    )
+
+    if not input_verified:
+        error_msg = f"Could not create account: {error}"
+        return routing.make_json_response(error_msg, 400)
+
+    user_id = generate_user_id()
+
+    hashed_password = get_hashed_password(data[pass_key], secret_file)
+
+    user_name = data[user_key]
+    if database.create_user(user_id, user_name, hashed_password):
+        resp = routing.make_json_response({"user_id": user_id, "user_name": user_name}, 200)
+        return save_auth_token(user_id, resp, secret_file, auth_max_age)
+
+    # Username not unique.
+    return routing.make_json_response("Username is already taken.", 400)
 
 def get_user_details():
     database = flask.current_app.config["DATABASE"]
