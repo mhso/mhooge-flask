@@ -1,14 +1,23 @@
 import json
+from typing import Literal
 
 import flask
 from flask_socketio import SocketIO
 
 socket_io: SocketIO = None
 
-def set_cookie(key, value, max_age, response):
+def set_cookie(
+    key,
+    value,
+    max_age: int,
+    httponly: bool,
+    samesite: Literal["Strict", "Lax", "None"],
+    secure: bool,
+    response: flask.Response,
+):
     path = flask.current_app.name
 
-    response.set_cookie(key, value, max_age, path=f"/{path}")
+    response.set_cookie(key, value, max_age, path=f"/{path}", secure=secure, httponly=httponly, samesite=samesite)
 
 def make_template_context(template, status=200, **variables):
     variables.update(flask.current_app.config["PERSISTENT_DATA"])

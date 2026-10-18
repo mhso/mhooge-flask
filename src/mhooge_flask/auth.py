@@ -2,6 +2,7 @@ import hashlib
 import json
 import random
 from time import time
+from typing import Literal
 
 import flask
 
@@ -30,7 +31,15 @@ def get_hashed_password(password, secret_file):
 
     return hashlib.sha256(bytes(password + salt, encoding="utf-8")).hexdigest()
 
-def save_auth_token(user_id, resp, secret_file, max_age=60*60*24*60):
+def save_auth_token(
+    user_id,
+    resp,
+    secret_file,
+    max_age: int = 60*60*24*60,
+    httponly: bool = True,
+    samesite: Literal["Strict", "Lax", "None"] = "Lax",
+    secure: bool = True,
+):
     database = flask.current_app.config["DATABASE"]
     auth_token = generate_auth_token(user_id, secret_file)
 
@@ -38,7 +47,7 @@ def save_auth_token(user_id, resp, secret_file, max_age=60*60*24*60):
 
     database.save_auth_token(auth_token, user_id, max_age)
 
-    routing.set_cookie(f"{app_name}_token", auth_token, max_age, resp)
+    routing.set_cookie(f"{app_name}_token", auth_token, max_age, httponly, samesite, secure, resp)
 
     return resp
 
@@ -75,7 +84,15 @@ def login(data, user_key, pass_key, url_success, template_error, auth_max_age=60
 
     return save_auth_token(user_id, resp, secret_file, auth_max_age)
 
-def login_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
+def login_json(
+    data,
+    user_key,
+    pass_key,
+    auth_max_age=60*60*24*60,
+    httponly: bool = True,
+    samesite: Literal["Strict", "Lax", "None"] = "Lax",
+    secure: bool = True,
+):
     database = flask.current_app.config["DATABASE"]
     secret_file = flask.current_app.config["SECRET_FILE"]
 
@@ -95,7 +112,7 @@ def login_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
 
     resp = routing.make_json_response({"user_id": user_id, "user_name": user_name}, 200)
 
-    return save_auth_token(user_id, resp, secret_file, auth_max_age)
+    return save_auth_token(user_id, resp, secret_file, auth_max_age, httponly, samesite, secure)
 
 def signup(data, user_key, pass_key, url_success, template_error, auth_max_age=60*60*24*60):
     database = flask.current_app.config["DATABASE"]
@@ -120,7 +137,15 @@ def signup(data, user_key, pass_key, url_success, template_error, auth_max_age=6
     # Username not unique.
     return routing.make_template_context(template_error, 400, error="Username is already taken.")
 
-def signup_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
+def signup_json(
+    data,
+    user_key,
+    pass_key,
+    auth_max_age=60*60*24*60,
+    httponly: bool = True,
+    samesite: Literal["Strict", "Lax", "None"] = "Lax",
+    secure: bool = True,
+):
     database = flask.current_app.config["DATABASE"]
     secret_file = flask.current_app.config["SECRET_FILE"]
 
@@ -139,7 +164,7 @@ def signup_json(data, user_key, pass_key, auth_max_age=60*60*24*60):
     user_name = data[user_key]
     if database.create_user(user_id, user_name, hashed_password):
         resp = routing.make_json_response({"user_id": user_id, "user_name": user_name}, 200)
-        return save_auth_token(user_id, resp, secret_file, auth_max_age)
+        return save_auth_token(user_id, resp, secret_file, auth_max_age, httponly, samesite, secure)
 
     # Username not unique.
     return routing.make_json_response("Username is already taken.", 400)
