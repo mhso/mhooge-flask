@@ -100,6 +100,7 @@ def create_app(
     routes: list[Route],
     database: Database,
     root_folder: str = "app",
+    static_path: str | None = None,
     static_folder: str = "static",
     template_folder: str = "templates",
     server_cls: type[ServerWrapper] | None = WSGIServerWrapper,
@@ -123,6 +124,7 @@ def create_app(
 
     web_app = Flask(
         app_name,
+        static_url_path=static_path,
         root_path=root_full_path,
         static_folder=static_folder,
         template_folder=template_folder
