@@ -24,7 +24,7 @@ def make_template_context(template, status=200, **variables):
     return flask.render_template(template, **variables), status
 
 def make_json_response(data, http_code):
-    if not isinstance(data, dict):
+    if not isinstance(data, (dict, list)):
         data = {"response": str(data)}
 
     resp = flask.Response(response=json.dumps(data), status=http_code, mimetype="application/json")
