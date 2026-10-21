@@ -193,7 +193,10 @@ class Database:
     def get_connection(self) -> Connection | Session | None:
         ...
 
-    def close(self, thread_id: int):
+    def close(self, thread_id: int | None = None):
+        if thread_id is None:
+            thread_id = get_ident()
+
         self._connections[thread_id].close()
         del self._connections[thread_id]
         del self._nested_contexts[thread_id]
@@ -348,7 +351,7 @@ class SQLAlchemyDatabase(Database):
         for _, module_name, _ in pkgutil.walk_packages([self.models_folder], package + "."):
             importlib.import_module(module_name.replace("/", "."), __package__)
 
-    def __enter__(self):
+    def open(self):
         thread_id = get_ident()
         nested_contexts = self._nested_contexts.get(thread_id, 0)
         nested_contexts += 1
@@ -360,6 +363,9 @@ class SQLAlchemyDatabase(Database):
 
         self._connections[thread_id] = self.get_connection()
         return self._connections[thread_id]
+
+    def __enter__(self):
+        return self.open()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         thread_id = get_ident()
