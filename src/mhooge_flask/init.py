@@ -206,7 +206,7 @@ def create_app(
         )
 
     if server_cls is SocketIOServerWrapper:
-        routing.socket_io.init_app(web_app)
+        routing.socket_io.init_app(web_app, path=f"{app_name}/socket.io")
 
     return web_app
 
