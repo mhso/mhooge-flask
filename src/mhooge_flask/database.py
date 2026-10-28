@@ -291,7 +291,7 @@ class SQLAlchemyDatabase(Database):
     def __init__(self, conn_str: str, models_folder: str, backup_path: str, autogenerate_schemas: bool = False, add_user_tables: bool = False) -> None:
         super().__init__(conn_str, add_user_tables)
 
-        self.engine = create_engine(conn_str, pool_pre_ping=True)
+        self.engine = create_engine(self.conn_str, **self.engine_properties)
 
         self.models_folder = models_folder
         self.backup_path = backup_path
@@ -308,6 +308,10 @@ class SQLAlchemyDatabase(Database):
             for class_ in Base.__subclasses__():
                 if hasattr(class_, "__tablename__"):
                     event.listen(class_, "init", model_init)
+
+    @property
+    def engine_properties(self):
+        return {"pool_pre_ping": True}
 
     def create_database_if_missing(self):
         try:
