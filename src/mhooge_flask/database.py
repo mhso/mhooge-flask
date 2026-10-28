@@ -333,9 +333,22 @@ class SQLAlchemyDatabase(Database):
         self._create_tables()
 
     def create_backup(self):
-        args = ["pg_dump", self.engine.url.database]
-        with open(f"{self.backup_path}/pg_backup", "w") as fp:
-            Popen(args, stdout=fp, shell=True).wait()
+        if self.engine.name == "postgresl":
+            args = ["pg_dump", self.engine.url.database]
+            with open(f"{self.backup_path}/pg_backup", "w") as fp:
+                Popen(args, stdout=fp, shell=True).wait()
+        elif self.engine.name == "sqlite":
+            path = self.engine.url.removeprefix("sqlite:///")
+            without_ext = path.split(".")[0]
+            backup_name = f"{without_ext}_backup.db"
+            try:
+                # Remove old backup if it exists.
+                if os.path.exists(backup_name):
+                    os.remove(backup_name)
+    
+                copyfile(self.conn_str, backup_name)
+            except (OSError, IOError) as exc:
+                raise DBException(exc.args[0])
 
     def get_connection(self):
         return self._sessionmaker()
